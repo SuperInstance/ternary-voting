@@ -1,0 +1,6 @@
+[package]
+name = "ternary-voting"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Voting and consensus mechanisms with ternary values"
