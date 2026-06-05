@@ -102,3 +102,11 @@ Part of the SuperInstance ternary crate family. `ternary-voting` is a standalone
 ## License
 
 MIT
+
+## See Also
+- **ternary-consensus** — related
+- **ternary-game-theory** — related
+- **ternary-auction** — related
+- **ternary-market** — related
+- **ternary-quorum** — related
+
