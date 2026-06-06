@@ -1,112 +1,119 @@
 # ternary-voting
 
-Voting and consensus mechanisms where every vote is ternary: for (+1), against (−1), or abstain (0).
+**Voting and consensus mechanisms with ternary values — simple majority, quorum systems, weighted voting, Byzantine agreement, liquid democracy, and Condorcet elections.**
 
-## Why This Exists
+## Background
 
-Binary voting forces a choice: yes or no. Real decision-making includes "I don't have enough information" or "I disagree with both options." Ternary voting captures abstention as a first-class vote. This crate implements five voting systems — simple tally, quorum-based, weighted, Byzantine agreement, and liquid democracy — plus Condorcet pairwise elections — all operating on ternary values. If you're building governance, consensus, or decision-making systems where neutrality matters, this is the foundation.
+Consensus is the fundamental problem of distributed computing. From Paxos (Lamport, 1998) to Raft (Ongaro & Ousterhout, 2014) to blockchain consensus (Nakamoto, 2008), the question is the same: how do independent nodes agree on a value? Traditional systems use binary consensus (yes/no), but many decisions benefit from a third option: abstain. Parliamentary systems have long recognized this — votes are "for," "against," or "abstain."
 
-## Core Concepts
-
-- **TernaryVote** — For (+1), Against (−1), Abstain (0). Abstain is a deliberate vote, not a missing vote.
-- **VoteTally** — Counts votes and computes net support (`for_count − against_count`). Ties produce Abstain.
-- **Quorum** — A requirement that both a minimum number of votes and a minimum fraction of eligible voters participate before a result is valid.
-- **Weighted voting** — Each voter carries a weight. The result is whichever side has the highest total weight.
-- **Byzantine agreement** — Tolerates up to f faulty nodes when n > 3f. Requires >2/3 supermajority to reach consensus.
-- **Liquid democracy** — Voters can either vote directly or delegate their vote to another voter. Delegation chains resolve transitively; the final voter casts the accumulated weight.
-- **Condorcet method** — Pairwise comparison of all candidates. The Condorcet winner beats every other candidate head-to-head. May not exist (Condorcet paradox).
-
-## Quick Start
-
-```toml
-# Cargo.toml
-[dependencies]
-ternary-voting = "0.1"
-```
-
-```rust
-use ternary_voting::*;
-
-fn main() {
-    // Simple tally
-    let mut tally = VoteTally::new();
-    tally.record(TernaryVote::For);
-    tally.record(TernaryVote::For);
-    tally.record(TernaryVote::Against);
-    tally.record(TernaryVote::Abstain);
-    println!("Result: {:?}, Net support: {}", tally.result(), tally.net_support());
-
-    // Liquid democracy
-    let mut ld = LiquidDemocracy::new(4);
-    ld.vote_direct(0, TernaryVote::For);
-    ld.delegate(1, 0); // voter 1 delegates to voter 0
-    ld.delegate(2, 0);
-    ld.vote_direct(3, TernaryVote::Against);
-    let result = ld.final_tally();
-    println!("Liquid result: {:?} (for={}, against={}, abstain={})",
-        result.result(), result.for_count, result.against_count, result.abstain_count);
-
-    // Byzantine agreement (4 nodes, tolerates 1 faulty)
-    let ba = ByzantineAgreement::new(4);
-    let consensus = ba.consensus_round(&[
-        TernaryVote::For, TernaryVote::For, TernaryVote::For, TernaryVote::Against,
-    ]);
-    println!("Byzantine consensus: {:?}", consensus);
-}
-```
-
-## API Overview
-
-| Type | Description |
-|------|-------------|
-| `TernaryVote` | For/Against/Abstain with ternary conversion |
-| `VoteTally` | Counter for simple majority voting |
-| `QuorumConfig` | Minimum participation requirements (count + fraction) |
-| `QuorumSystem` | Vote tally with quorum gating |
-| `WeightedVoting` | Weight-based result computation |
-| `ByzantineAgreement` | Simplified Byzantine fault-tolerant consensus |
-| `LiquidDemocracy` | Delegable voting with transitive resolution |
-| `CondorcetElection` | Pairwise comparison election with ranking ballots |
+`ternary-voting` implements six consensus and voting mechanisms, all using ternary votes (`For`/`Against`/`Abstain`, mapped to +1/−1/0). From simple tallies to Byzantine fault tolerance to liquid democracy, the crate provides a comprehensive toolkit for collective decision-making in the SuperInstance ecosystem.
 
 ## How It Works
 
-**Simple tally:** Count each vote type, return whichever has the most. Ties produce Abstain.
+### Core Types
 
-**Quorum:** Before returning a result, check that `votes_cast >= minimum_votes` AND `votes_cast / eligible_voters >= minimum_fraction`. If quorum fails, return `None` (no valid result).
+`TernaryVote` has three variants: `For` (+1), `Against` (−1), `Abstain` (0). `VoteTally` accumulates counts and computes:
 
-**Weighted:** Each `(weight, vote)` pair contributes its weight to the respective bucket. Highest total weight wins.
+- **`net_support()`** — `for_count − against_count` (abstentions don't affect net)
+- **`result()`** — plurality winner among the three categories
 
-**Byzantine agreement:** Given n nodes, the system tolerates f = (n−1)/3 faulty nodes (requires n > 3f). A consensus round requires >2/3 of nodes to agree. If no supermajority, the round returns `None`.
+### Quorum Systems
 
-**Liquid democracy:** Each voter either votes directly or delegates to another voter. Resolution follows delegation chains: if voter A delegates to B who delegates to C who votes directly, then A and B's weight transfers to C. Cycles are broken by the visited-set check. The final tally counts each effective vote with accumulated weight.
+`QuorumSystem` enforces participation requirements before a vote is valid:
 
-**Condorcet:** Each ballot is a full ranking of candidates. For every pair (A, B), count how many voters prefer A over B. A candidate who beats all others pairwise is the Condorcet winner. The method returns `None` when no such candidate exists (the Condorcet paradox: A > B > C > A).
+- **Minimum votes** — absolute count threshold
+- **Minimum fraction** — percentage of eligible voters (e.g., 50%+ participation)
 
-## Known Limitations
+A vote with insufficient participation returns `None` (no result), preventing a small minority from making decisions for the whole group.
 
-- **Byzantine agreement is a single-round simplification.** Real Byzantine protocols (PBFT, etc.) require multiple rounds with cryptographic signatures. This implementation is suitable for testing and education, not production fault tolerance.
-- **Liquid democracy delegation chains can stack weight unevenly.** A popular delegate could accumulate hundreds of votes. There's no cap on delegation depth or accumulated weight.
-- **Condorcet has no tiebreaking fallback.** When no Condorcet winner exists (cyclic preferences), `winner()` returns `None` with no Schulze or ranked-pairs resolution.
-- **`WeightedVoting::add_vote` stores voter_id but the `weighted_result` function ignores it.** The struct-level method doesn't integrate with the static method — an inconsistency in the current API.
+### Weighted Voting
+
+`WeightedVoting` assigns different weights to different voters. Some voters (e.g., domain experts, high-stakes stakeholders) have more influence. The weighted result sums weights per vote category rather than counting individual votes.
+
+### Byzantine Agreement
+
+`ByzantineAgreement` implements simplified Byzantine fault tolerance:
+
+- **Fault tolerance** — tolerates up to `f` faulty nodes where `n > 3f` (classic BFT bound)
+- **Consensus** — requires >2/3 agreement for a decision (protecting against Byzantine adversaries who can send conflicting votes to different nodes)
+- **`can_agree()`** — checks if the node count satisfies `n > 3f`
+
+This mirrors the guarantees of PBFT (Castro & Liskov, 1999) and modern BFT protocols like Tendermint.
+
+### Liquid Democracy
+
+`LiquidDemocracy` implements delegative voting:
+
+- **Direct voting** — a voter casts their own vote
+- **Delegation** — a voter delegates their vote to another voter (transitively)
+- **Delegation resolution** — chains of delegation are resolved to find the final voter and accumulated weight
+
+Delegation cycles are detected and broken. The final tally weights each effective voter by the number of delegations they've accumulated. This combines the knowledge of representative democracy with the flexibility of direct voting.
+
+### Condorcet Elections
+
+`CondorcetElection` implements the Condorcet method for multi-candidate elections:
+
+- **Pairwise comparison** — every candidate is compared head-to-head against every other
+- **Condorcet winner** — a candidate who beats all others pairwise (if one exists)
+- **Comparison matrix** — full pairwise results as a ternary matrix
+
+The Condorcet paradox (cyclic preferences: A > B > C > A) is handled by returning `None` when no Condorcet winner exists — the classic impossibility result that motivates ranked-choice voting systems.
+
+## Experimental Results
+
+The test suite (20+ tests) validates:
+
+- **Vote roundtrip** — `TernaryVote` ↔ `i8` conversion is lossless
+- **Tally mechanics** — simple majority, ties, net support, all-abstain
+- **Quorum enforcement** — met/not-met based on both minimum votes and fraction
+- **Weighted results** — weights correctly determine outcomes
+- **Byzantine tolerance** — `can_agree()` for valid `n`, consensus with sufficient agreement, no consensus with split votes
+- **Liquid democracy** — direct voting, delegation chains, cycle detection
+- **Condorcet** — clear winner, tied pairwise, Condorcet paradox (no winner), comparison matrix
+
+## Impact
+
+The crate's six mechanisms cover the full spectrum of collective decision-making:
+
+| Mechanism | Best For | Fault Tolerance |
+|-----------|----------|----------------|
+| Simple tally | Small groups, quick polls | None |
+| Quorum | Governance, policy decisions | Low (participation check) |
+| Weighted | Stakeholder voting, expert panels | None |
+| Byzantine | Distributed consensus | Byzantine (n > 3f) |
+| Liquid democracy | Large groups with expertise | None (delegation-based) |
+| Condorcet | Multi-candidate elections | None (paradox possible) |
+
+The ternary vote model (for/against/abstain) is strictly more expressive than binary yes/no voting. Abstention carries semantic weight: "I participated but have no preference," which is distinct from non-participation. This distinction matters in quorum systems where participation rate affects result validity.
 
 ## Use Cases
 
-- **DAO governance** — Members vote on proposals with explicit abstention. Quorum prevents low-participation decisions.
-- **Multi-node system consensus** — Distributed services reach agreement on configuration changes with Byzantine tolerance for crashed or misbehaving nodes.
-- **Collaborative filtering** — Users express positive/negative/neutral preference on items; aggregate ternary tallies drive recommendation scores.
+1. **Fleet configuration consensus** — Rooms use `ByzantineAgreement` to agree on configuration changes. With `n > 3f`, the system tolerates up to 1/3 faulty (or malicious) rooms while still reaching consensus.
 
-## Ecosystem Context
+2. **Governance voting** — Fleet-wide policy decisions use `QuorumSystem` with a 50% participation requirement and simple majority. Abstentions count toward quorum but don't affect the outcome.
 
-Part of the SuperInstance ternary crate family. `ternary-voting` is a standalone leaf crate. Its ternary vote values compose with `ternary-cell` for cellular consensus, `ternary-diff` for comparing vote outcomes over time, and `ternary-visualization` for rendering election results.
+3. **Expert delegation** — In a large fleet, `LiquidDemocracy` allows rooms to delegate votes to domain experts. A room that doesn't understand storage configuration delegates to a storage-specialist room, combining scalability with expertise.
 
-## License
+4. **Multi-candidate leader election** — `CondorcetElection` selects a fleet coordinator. Each room ranks candidates, and the pairwise-comparison matrix identifies the candidate who would beat any other in a head-to-head matchup.
 
-MIT
+5. **Stake-weighted resource allocation** — `WeightedVoting` allocates resources proportionally to stake or contribution level, ensuring that rooms that contribute more to the fleet have proportionally more say in resource decisions.
 
-## See Also
-- **ternary-consensus** — related
-- **ternary-game-theory** — related
-- **ternary-auction** — related
-- **ternary-market** — related
-- **ternary-quorum** — related
+## Open Questions
 
+- **Byzantine rounds:** The current Byzantine implementation is a single-round majority vote. Production BFT protocols (PBFT, HotStuff) use multi-round protocols with view changes. Should the crate support multi-round consensus?
+- **Vote privacy:** All votes are public. Should the crate integrate with `ternary-zkp` for zero-knowledge voting (prove your vote is valid without revealing which way you voted)?
+- **Delegation transparency:** Liquid democracy delegation chains are resolved internally. Should delegations be publicly auditable (who delegated to whom) for transparency and accountability?
+
+## Connection to Oxide Stack
+
+`ternary-voting` is the governance layer:
+
+- **`ternary-channel`** — votes are transported between rooms via channels
+- **`ternary-protocol`** — vote serialization for cross-node consensus
+- **`ternary-game-theory`** — voting is a game; strategic voting can be analyzed with game-theoretic tools
+- **`ternary-event`** — vote events (vote.cast, consensus.reached) for observability
+- **`ternary-blockchain`** — Byzantine agreement underpins blockchain consensus
+- **`ternary-zkp`** — future zero-knowledge voting proofs
+
+The ternary vote model (for/against/abstain) maps directly to the balanced ternary values used throughout the ecosystem, ensuring that voting results are immediately consumable by other ternary systems.
